@@ -1,7 +1,7 @@
 import polars as pl
 import os
 
-from HarvardDataverse import HarvardDataverse
+from dataverse import HarvardDataverse
 
 
 TOKEN = os.getenv("HARVARD_API_KEY")

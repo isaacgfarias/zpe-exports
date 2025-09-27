@@ -4,9 +4,9 @@ import polars as pl
 # import streamlit as st
 import os
 
-from ComexStat import ComexStat
-from Comtrade import Comtrade
-from HarvardDataverse import HarvardDataverse
+from comexstat import ComexStat
+from comtrade import Comtrade
+from dataverse import HarvardDataverse
 
 # %% COMTRADE's
 comtrade = Comtrade()
