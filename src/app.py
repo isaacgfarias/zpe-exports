@@ -39,7 +39,6 @@ def calcular_vcr_ceara_brasil(df_comexstat):
     Calcula o VCR (Vantagem Comparativa Revelada) do Ceará em relação ao Brasil
     para cada 'headingCode' (setor i), utilizando o Valor FOB (metricFOB).
     """
-    # ... (Função inalterada)
     # Filtrar dados válidos e garantir coerência de tipos
     df_comexstat_valid = df_comexstat[df_comexstat["metricFOB"] > 0].copy()
     df_comexstat_valid["headingCode"] = df_comexstat_valid["headingCode"].astype(str)
@@ -80,7 +79,6 @@ def calcular_vcr_ceara_brasil(df_comexstat):
 
 @st.cache_data
 def obter_vcr_brasil_mundo(df_harvard):
-    # ... (Função inalterada)
     """
     Obtém o VCR do Brasil em relação ao Mundo a partir da coluna 'export_rca'
     do Harvard Dataverse, por 'product_hs92_code' (setor i).
@@ -100,7 +98,6 @@ def obter_vcr_brasil_mundo(df_harvard):
 
 @st.cache_data
 def obter_pci_e_distancia(df_harvard):
-    # ... (Função inalterada)
     """
     Obtém o PCI e a Distância para cada setor (product_hs92_code).
     """
@@ -223,6 +220,146 @@ def calcular_vcr_dentro_selecao(df_comex_filtrado, df_comex_nacional):
     df_result = df_result.merge(df_headings, on="headingCode", how="left")
 
     return df_result[df_result["VCR"] > 0].sort_values(by="VCR", ascending=False)
+
+
+# ==============================================================================
+# NOVAS FUNÇÕES EXIGIDAS PELA LÓGICA DO DOCUMENTO ANEXO
+# ==============================================================================
+
+
+def normalizar_vcr(df: pd.DataFrame, coluna_vcr: str) -> pd.DataFrame:
+    """
+    Normaliza os valores de uma coluna de VCR para um intervalo de 0 a 1.
+    Fórmula: VCRi^Norm = (VCRi - VCRmin) / (VCRmax - VCRmin)
+    Aplica-se apenas a valores numéricos válidos.
+    """
+    coluna_norm = coluna_vcr + "_NORM"
+
+    # Converte para numérico e remove NaNs para o cálculo min/max
+    vcr_numeric = pd.to_numeric(df[coluna_vcr], errors="coerce").dropna()
+
+    if vcr_numeric.empty:
+        df[coluna_norm] = 0.0
+        return df
+
+    vcr_min = vcr_numeric.min()
+    vcr_max = vcr_numeric.max()
+
+    if vcr_max == vcr_min:
+        df[coluna_norm] = 0.0
+    else:
+        # Aplica a normalização, tratando NaNs (que serão preenchidos depois)
+        df[coluna_norm] = (df[coluna_vcr].astype(float) - vcr_min) / (vcr_max - vcr_min)
+
+    return df
+
+
+def calcular_vcr_ajustado(df_metrics: pd.DataFrame) -> pd.DataFrame:
+    """
+    IMPLEMENTAÇÃO PLACEHOLDER (VCR Ajustado).
+    O cálculo real do VCR Ajustado (baseado em Empregos, Empresas, etc.) exige
+    dados municipais/setoriais que não são carregados em 'app.py' (apenas Comex, Harvard, Comtrade).
+
+    Esta função implementa um PLACEHOLDER simulando o VCR Ajustado (VCR_AJUSTADO)
+    e o VCR Ajustado Normalizado (VCR_AJUSTADO_NORM) baseado no PCI e VCR Ceará/Brasil,
+    para que a lógica de normalização possa ser demonstrada.
+    """
+    df = df_metrics.copy()
+
+    # Placeholder: VCR_AJUSTADO é uma combinação do VCR tradicional e PCI
+    # Isso simula um índice de complexidade local/setorial.
+    vcr_ce_br = pd.to_numeric(df["VCR_Ceara_Brasil"], errors="coerce").fillna(0)
+    pci = pd.to_numeric(df["PCI"], errors="coerce").fillna(0)
+
+    # Simulação da fórmula: (VCR_CE/BR + PCI) / 2
+    df["VCR_AJUSTADO"] = np.where(
+        (vcr_ce_br > 1) & (pci.notna()),
+        (vcr_ce_br + pci) / 2,  # Combinação quando há vantagem
+        vcr_ce_br,  # Apenas VCR quando não há vantagem (ou PCI ausente)
+    )
+
+    # Normalização conforme documento
+    df = normalizar_vcr(df, "VCR_AJUSTADO")
+
+    return df
+
+
+def calcular_indice_prioridade_ajustado(df: pd.DataFrame, pesos: dict) -> pd.DataFrame:
+    """
+    Calcula o Índice de Prioridade Ajustado utilizando as métricas normalizadas
+    e os pesos definidos pelo usuário.
+    """
+    df_calc = df.copy()
+
+    # Certifica-se de que as colunas normalizadas são float, tratando NaNs
+    df_calc["VCR_CE_NORM"] = pd.to_numeric(
+        df_calc["VCR_Ceara_Brasil_NORM"], errors="coerce"
+    ).fillna(0)
+    df_calc["VCR_BR_NORM"] = pd.to_numeric(
+        df_calc["VCR_Brasil_Mundo_NORM"], errors="coerce"
+    ).fillna(0)
+    df_calc["VCR_AJ_NORM"] = pd.to_numeric(
+        df_calc["VCR_AJUSTADO_NORM"], errors="coerce"
+    ).fillna(0)
+    df_calc["PCI_NORM"] = pd.to_numeric(df_calc["PCI_NORM"], errors="coerce").fillna(0)
+
+    # Normalização da Distância: Inverter a lógica. Distâncias menores devem ter valor maior (proximidade).
+    # Assumimos que a Distância (métrica bruta) já foi normalizada de 0 a 1 em "Distancia_Parceiros_NORM"
+    # Se Distancia_Parceiros_NORM for a proximidade:
+    dist_norm = pd.to_numeric(
+        df_calc["Distancia_Parceiros_NORM"], errors="coerce"
+    ).fillna(0)
+
+    # Se Distancia_Parceiros_NORM for a distância (quanto maior, pior):
+    # Vamos reverter (1 - Distância Normalizada) para obter a Proximidade Normalizada
+    proximidade_norm = 1 - dist_norm
+
+    # Cálculo do Índice de Prioridade Ajustado (Soma Ponderada)
+    # VCR_estadual + VCR_país + VCR_Ajustado são métricas positivas (quanto maior, melhor)
+    # PCI é métrica positiva (quanto maior, melhor)
+    # Distância é métrica negativa (quanto maior, pior) -> usamos Proximidade
+
+    # Peso total para garantir que a soma das VCRs seja ponderada corretamente
+    peso_vcr_total = pesos["vcr_ceara"] + pesos["vcr_brasil"] + pesos["vcr_ajustado"]
+
+    # Normalização dos pesos VCRs para soma 1 (para o subconjunto VCR)
+    if peso_vcr_total > 0:
+        peso_vcr_ceara = pesos["vcr_ceara"] / peso_vcr_total
+        peso_vcr_brasil = pesos["vcr_brasil"] / peso_vcr_total
+        peso_vcr_ajustado = pesos["vcr_ajustado"] / peso_vcr_total
+    else:
+        # Se os pesos VCRs forem zero, distribuímos igualmente para evitar NaN
+        peso_vcr_ceara = peso_vcr_brasil = peso_vcr_ajustado = 1 / 3
+
+    # Índice VCR Composto (normalizado)
+    indice_vcr = (
+        (df_calc["VCR_CE_NORM"] * peso_vcr_ceara)
+        + (df_calc["VCR_BR_NORM"] * peso_vcr_brasil)
+        + (df_calc["VCR_AJ_NORM"] * peso_vcr_ajustado)
+    )
+
+    # Índice Final: Combinação dos 3 componentes (VCR_Composto, PCI, Proximidade)
+    # Assumimos que os pesos PCI, Distancia e o peso VCR_total (1) são os pesos finais
+
+    # Normalizando os 3 grandes grupos de pesos (VCR Total, PCI, Distância) para somarem 1
+    peso_total_geral = 1 + pesos["pci"] + pesos["distancia"]
+
+    peso_vcr_composto = 1 / peso_total_geral  # Peso do subconjunto VCR
+    peso_pci = pesos["pci"] / peso_total_geral
+    peso_distancia = pesos["distancia"] / peso_total_geral
+
+    df_calc["INDICE_PRIORIDADE_AJUSTADO"] = (
+        (indice_vcr * peso_vcr_composto)
+        + (df_calc["PCI_NORM"] * peso_pci)
+        + (proximidade_norm * peso_distancia)
+    )
+
+    return df_calc
+
+
+# ==============================================================================
+# FIM DAS NOVAS FUNÇÕES
+# ==============================================================================
 
 
 # %%
@@ -792,6 +929,74 @@ with tab_compare:
         "Consolidação de métricas de VCR (Vantagem Comparativa Revelada), Distância e PCI (Índice de Complexidade de Produtos) por Código HS."
     )
 
+    # --- 0. Controles de Pesos (Sidebar para tempo real) ---
+    st.markdown("### 🎚️ Ajuste de Pesos para o Índice de Prioridade")
+    st.markdown(
+        "Utilize os sliders para definir a importância de cada métrica no **Índice de Prioridade Ajustado**."
+    )
+
+    col_vcr_ce, col_vcr_br, col_vcr_aj, col_pci, col_dist = st.columns(5)
+
+    # Pesos para as 3 VCRs (sub-componentes do 'Índice VCR Composto')
+    vcr_ceara_weight = col_vcr_ce.slider(
+        "Peso VCR Estadual",
+        0.0,
+        1.0,
+        0.4,
+        0.05,
+        key="w_vcr_ceara",
+        help="Prioriza VCR do estado (Ceará/Brasil).",
+    )
+    vcr_brasil_weight = col_vcr_br.slider(
+        "Peso VCR País",
+        0.0,
+        1.0,
+        0.3,
+        0.05,
+        key="w_vcr_brasil",
+        help="Prioriza VCR do país (Brasil/Mundo).",
+    )
+    vcr_ajustado_weight = col_vcr_aj.slider(
+        "Peso VCR Ajustado",
+        0.0,
+        1.0,
+        0.3,
+        0.05,
+        key="w_vcr_ajustado",
+        help="Prioriza o VCR Ajustado (baseado na Complexidade Local).",
+    )
+
+    # Pesos para PCI e Distância (componentes de topo)
+    pci_weight = col_pci.slider(
+        "Peso PCI",
+        0.0,
+        1.0,
+        0.3,
+        0.05,
+        key="w_pci",
+        help="Prioriza a Complexidade do Produto (PCI).",
+    )
+    distancia_weight = col_dist.slider(
+        "Peso Distância",
+        0.0,
+        1.0,
+        0.4,
+        0.05,
+        key="w_distancia",
+        help="Prioriza a Proximidade dos Parceiros (1 - Distância).",
+    )
+
+    # Dicionário de Pesos
+    pesos_dict = {
+        "vcr_ceara": vcr_ceara_weight,
+        "vcr_brasil": vcr_brasil_weight,
+        "vcr_ajustado": vcr_ajustado_weight,
+        "pci": pci_weight,
+        "distancia": distancia_weight,  # Métrica inversa (Proximidade)
+    }
+
+    st.markdown("---")
+
     # 1. Obter Tabela de Referência de Códigos HS e Descrições
     # Filtra códigos HS inválidos ou vazios
     df_referencia = comexstat_df[["headingCode", "heading"]].drop_duplicates()
@@ -812,52 +1017,104 @@ with tab_compare:
     df_final = df_final.merge(df_vcr_br_md, on="headingCode", how="left")
     df_final = df_final.merge(df_pci_dist, on="headingCode", how="left")
 
-    # 4. Formatação da Tabela
+    # 4. IMPLEMENTAÇÃO: Normalização dos VCRs Tradicionais (Estadual/País) e Distância (para PCI)
+    df_final = normalizar_vcr(df_final, "VCR_Ceara_Brasil")
+    df_final = normalizar_vcr(df_final, "VCR_Brasil_Mundo")
+    # Normalização do PCI
+    df_final = normalizar_vcr(df_final, "PCI")
+    # Normalização da Distância (Bruta)
+    df_final = normalizar_vcr(df_final, "Distancia_Parceiros")
+
+    # 5. IMPLEMENTAÇÃO: Cálculo do VCR Ajustado (Municipal/Setorial) e sua Normalização (Lógica do anexo)
+    # Nota: Este é um PLACEHOLDER, pois os dados municipais/setoriais (Empregos, PIB, etc.) não estão carregados.
+    df_final = calcular_vcr_ajustado(df_final)
+
+    # 6. IMPLEMENTAÇÃO: Cálculo do Índice de Prioridade Ajustado
+    df_final = calcular_indice_prioridade_ajustado(df_final, pesos_dict)
+
+    # 7. Formatação da Tabela
     df_final = df_final.rename(
         columns={
             "headingCode": "Código HS",
-            "VCR_Ceara_Brasil": "VCR Ceará/Brasil",
-            "VCR_Brasil_Mundo": "VCR Brasil/Mundo",
-            "Distancia_Parceiros": "Distância Parceiros",
-            "PCI": "PCI",
+            "VCR_Ceara_Brasil": "VCR estadual (Bruto)",
+            "VCR_Ceara_Brasil_NORM": "VCR estadual normalizada",
+            "VCR_Brasil_Mundo": "VCR país (Bruto)",
+            "VCR_Brasil_Mundo_NORM": "VCR país normalizada",
+            "Distancia_Parceiros": "distância entre parceiros (Bruto)",
+            "Distancia_Parceiros_NORM": "distância entre parceiros normalizada",
+            "PCI": "PCI (Bruto)",
+            "PCI_NORM": "PCI normalizado",
+            "VCR_AJUSTADO": "VCR Ajustado (Bruto)",
+            "VCR_AJUSTADO_NORM": "VCR Ajustado normalizado",
+            "INDICE_PRIORIDADE_AJUSTADO": "Índice de Prioridade Ajustado",
         }
     )
 
     # Arredondamento e limpeza
-    df_final["VCR Ceará/Brasil"] = pd.to_numeric(
-        df_final["VCR Ceará/Brasil"], errors="coerce"
-    ).round(3)
-    df_final["VCR Brasil/Mundo"] = pd.to_numeric(
-        df_final["VCR Brasil/Mundo"], errors="coerce"
-    ).round(3)
-    df_final["Distância Parceiros"] = pd.to_numeric(
-        df_final["Distância Parceiros"], errors="coerce"
-    ).round(3)
-    df_final["PCI"] = pd.to_numeric(df_final["PCI"], errors="coerce").round(3)
+    cols_to_round = [
+        "VCR estadual (Bruto)",
+        "VCR país (Bruto)",
+        "VCR estadual normalizada",
+        "VCR país normalizada",
+        "distância entre parceiros (Bruto)",
+        "PCI (Bruto)",
+        "VCR Ajustado (Bruto)",
+        "VCR Ajustado normalizado",
+        "PCI normalizado",
+        "distância entre parceiros normalizada",
+        "Índice de Prioridade Ajustado",
+    ]
+
+    for col in cols_to_round:
+        df_final[col] = pd.to_numeric(df_final[col], errors="coerce").round(3)
 
     # Substituir NaN por 'N/A'
     df_final = df_final.fillna("N/A")
 
-    # Ordenação final
+    # Ordenação final pela nova métrica ajustada
     df_final_sorted = df_final.sort_values(
-        by=["VCR Ceará/Brasil", "PCI"],
+        by=["Índice de Prioridade Ajustado"],
         key=lambda x: pd.to_numeric(x, errors="coerce"),
-        ascending=[False, False],
+        ascending=False,
     )
 
     # Exibição da Tabela Consolidada
-    st.subheader("Tabela de Especialização e Complexidade por Código HS")
+    st.subheader("Tabela de Especialização e Complexidade Ponderada")
+    st.info(
+        "A tabela é ordenada pelo **Índice de Prioridade Ajustado**, que combina as métricas normalizadas com os pesos definidos nos sliders."
+    )
+
+    # Colunas finais a serem exibidas (foco nas métricas normalizadas e no Índice)
+    column_order = [
+        "Código HS",
+        "Descrição",
+        "VCR estadual normalizada",
+        "VCR país normalizada",
+        "VCR Ajustado normalizado",
+        "PCI normalizado",
+        "distância entre parceiros normalizada",
+        "Índice de Prioridade Ajustado",
+    ]
+
+    # Exibir as métricas brutas também, em uma seção expansível
+    with st.expander("Visualizar Métrica Brutas"):
+        st.dataframe(
+            df_final_sorted[
+                [
+                    "Código HS",
+                    "Descrição",
+                    "VCR estadual (Bruto)",
+                    "VCR país (Bruto)",
+                    "VCR Ajustado (Bruto)",
+                    "PCI (Bruto)",
+                    "distância entre parceiros (Bruto)",
+                ]
+            ],
+            width="stretch",
+        )
+
     st.dataframe(
-        df_final_sorted[
-            [
-                "Código HS",
-                "Descrição",
-                "VCR Ceará/Brasil",
-                "VCR Brasil/Mundo",
-                "Distância Parceiros",
-                "PCI",
-            ]
-        ],
+        df_final_sorted[column_order],
         width="stretch",
     )
 

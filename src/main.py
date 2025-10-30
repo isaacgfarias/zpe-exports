@@ -11,7 +11,7 @@ def comtrade():
             partnerCode="76",
             typeCode="C",
             freqCode="A",
-            clCode="HS",  # aggregateBy=None
+            clCode="HS",
         )
     )
     comtrade_df = comtrade_df.filter(pl.col("classificationCode") == "H4")
@@ -40,7 +40,7 @@ def harvard():
 
 
 def comexstat():
-    from comexstat import ComexStat
+    from comexstat import Comexstat
 
     comex = ComexStat()
     comexstat_df = comex.query_comexstat_data(

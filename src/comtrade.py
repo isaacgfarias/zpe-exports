@@ -74,7 +74,7 @@ class Comtrade:
             clCode="HS",
             period="2023",
             reporterCode=None,
-            cmdCode="Total",
+            cmdCode="AG4",
             flowCode="X",
             partnerCode="76",
             partner2Code="0",
@@ -82,10 +82,10 @@ class Comtrade:
             motCode=None,
             maxRecords=None,
             format_output=None,
-            aggregateBy="partnerCode,partner2Code",
+            aggregateBy=None,
             breakdownMode="plus",
             countOnly=False,
-            includeDesc=False,
+            includeDesc=True,
         )
 
         final_filters = {**default_filters, **filters}

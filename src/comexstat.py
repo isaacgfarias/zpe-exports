@@ -3,7 +3,7 @@ import requests, os
 from typing import Dict, List, Optional, Any
 
 
-class ComexStat:
+class Comexstat:
     """
     Cliente para a API do ComexStat, otimizado para extração de dados.
     """
