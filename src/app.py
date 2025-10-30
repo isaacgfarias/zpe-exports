@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np  # Adicionado para operações numéricas robustas
 
 # Nota: As classes ComexStat, Comtrade e HarvardDataverse foram mantidas na importação
-from comexstat import ComexStat
+from comexstat import Comexstat
 from comtrade import Comtrade
 from dataverse import HarvardDataverse
 
@@ -46,7 +46,7 @@ def calcular_vcr_ceara_brasil(df_comexstat):
 
     # 1. Total das exportações (FOB) para o Brasil e Ceará
     X_total_brasil = df_comexstat_valid["metricFOB"].sum()
-    df_ceara = df_comexstat_valid[df_comexstat_valid["state"] == "CE"].copy()
+    df_ceara = df_comexstat_valid[df_comexstat_valid["state"] == "Ceará"].copy()
     X_total_ceara = df_ceara["metricFOB"].sum()
 
     if X_total_brasil == 0 or X_total_ceara == 0 or df_comexstat_valid.empty:
@@ -375,7 +375,7 @@ with tab_comex:
 
         # 1. Filtro de Estado (UF) - Default: 'CE'
         states = sorted(comexstat_df["state"].dropna().unique().tolist())
-        default_state = ["CE"] if "CE" in states else states[:1]
+        default_state = ["Ceará"] if "Ceará" in states else states[:1]
 
         selected_states = col_state.multiselect(
             "Selecione o(s) Estado(s)",
