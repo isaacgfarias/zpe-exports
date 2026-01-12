@@ -135,6 +135,64 @@ def calcular_indice_prioridade_ajustado(df: pd.DataFrame, pesos: dict) -> pd.Dat
     return df_calc
 
 
+@st.cache_data
+def carregar_mapeamento_ncm_cnae(file_path: str):
+    """
+    Carrega e limpa a tabela de correspondência NCM x CNAE.
+    Lida com o formato específico do CSV (pula cabeçalho, limpa strings).
+    """
+    try:
+        # Pula a primeira linha de título e lê os cabeçalhos reais
+        df_map = pd.read_csv(file_path, skiprows=1)
+
+        # Renomeia colunas para facilitar o acesso
+        df_map.columns = ["ncm8_raw", "ncm_descricao", "cnae_raw"]
+
+        # 1. Limpeza do NCM: remove .0, preenche com zeros à esquerda (8 dígitos)
+        df_map["ncm8"] = (
+            df_map["ncm8_raw"]
+            .astype(str)
+            .str.replace(r"\.0$", "", regex=True)
+            .str.zfill(8)
+        )
+
+        # 2. Extração do SH4 (Prefixos)
+        df_map["sh4"] = df_map["ncm8"].str[:4]
+
+        # 3. Limpeza da CNAE: Remove pontos e lida com múltiplos códigos (explode)
+        # Ex: "0151.2; 0152.1" vira duas linhas
+        df_map["cnae_list"] = df_map["cnae_raw"].astype(str).str.split(";")
+        df_map = df_map.explode("cnae_list")
+        df_map["cnae7"] = (
+            df_map["cnae_list"].str.replace(r"[\. -]", "", regex=True).str.strip()
+        )
+
+        # Remove códigos inválidos (como XXXX ou SEM TEC)
+        df_map = df_map[df_map["cnae7"].str.isnumeric()]
+
+        return df_map[["ncm8", "sh4", "ncm_descricao", "cnae7"]]
+    except Exception as e:
+        st.error(f"Erro ao carregar mapeamento NCM/CNAE: {e}")
+        return pd.DataFrame()
+
+
+def filtrar_mapeamento_por_cliente(
+    df_map, ncm_exportados_cliente: list, cnaes_cliente: list = None
+):
+    """
+    Refina o mapeamento para os NCMs que o cliente de fato opera
+    e opcionalmente filtra pelas CNAEs registradas no CNPJ dele.
+    """
+    # Filtra pelos NCMs reais da operação
+    df_filtered = df_map[df_map["ncm8"].isin(ncm_exportados_cliente)]
+
+    # Se fornecido, filtra pelas CNAEs do cliente (estratégia de Direct Mapping)
+    if cnaes_cliente:
+        df_filtered = df_filtered[df_filtered["cnae7"].isin(cnaes_cliente)]
+
+    return df_filtered
+
+
 # def calcular_indice_prioridade_ajustado(df: pd.DataFrame, pesos: dict) -> pd.DataFrame:
 #     """
 #     Calcula o Índice de Prioridade Ajustado removendo a métrica de VCR Ajustado
