@@ -496,10 +496,246 @@ st.markdown(
 )
 
 # Criação das abas
-tab_comex, tab_harvard, tab_comtrade, tab_compare = st.tabs(
-    ["ComexStat", "Harvard Dataverse", "Comtrade", "Análise Comparativa"]
+tab_compare, tab_comex, tab_harvard, tab_comtrade = st.tabs(
+    [
+        "Análise Comparativa",
+        "ComexStat",
+        "Harvard Dataverse",
+        "Comtrade",
+    ]
 )
 
+
+# %%
+# Aba Análise Comparativa
+with tab_compare:
+    st.header("Análise Comparativa de Especialização e Complexidade")
+    st.markdown(
+        "Consolidação de métricas de VCR (Vantagem Comparativa Revelada), Distância e PCI (Índice de Complexidade de Produtos) por Código HS."
+    )
+
+    # --- 0. Controles de Pesos (Sidebar para tempo real) ---
+    st.markdown("### 🎚️ Ajuste de Pesos para o Índice de Prioridade")
+    st.markdown(
+        "Utilize os sliders para definir a importância de cada métrica no **Índice de Prioridade Ajustado**."
+    )
+
+    col_vcr_ce, col_vcr_br, col_vcr_aj, col_pci, col_dist = st.columns(5)
+
+    # Pesos para as 3 VCRs (sub-componentes do 'Índice VCR Composto')
+    vcr_ceara_weight = col_vcr_ce.slider(
+        "Peso VCR Estadual",
+        0.0,
+        1.0,
+        0.4,
+        0.05,
+        key="w_vcr_ceara",
+        help="Prioriza VCR do estado (Ceará/Brasil).",
+    )
+    vcr_brasil_weight = col_vcr_br.slider(
+        "Peso VCR País",
+        0.0,
+        1.0,
+        0.3,
+        0.05,
+        key="w_vcr_brasil",
+        help="Prioriza VCR do país (Brasil/Mundo).",
+    )
+    vcr_ajustado_weight = col_vcr_aj.slider(
+        "Peso VCR Ajustado",
+        0.0,
+        1.0,
+        0.3,
+        0.05,
+        key="w_vcr_ajustado",
+        help="Prioriza o VCR Ajustado (baseado na Complexidade Local).",
+    )
+
+    # Pesos para PCI e Distância (componentes de topo)
+    pci_weight = col_pci.slider(
+        "Peso PCI",
+        0.0,
+        1.0,
+        0.3,
+        0.05,
+        key="w_pci",
+        help="Prioriza a Complexidade do Produto (PCI).",
+    )
+    distancia_weight = col_dist.slider(
+        "Peso Distância",
+        0.0,
+        1.0,
+        0.4,
+        0.05,
+        key="w_distancia",
+        help="Prioriza a Proximidade dos Parceiros (1 - Distância).",
+    )
+
+    # Dicionário de Pesos
+    pesos_dict = {
+        "vcr_ceara": vcr_ceara_weight,
+        "vcr_brasil": vcr_brasil_weight,
+        "vcr_ajustado": vcr_ajustado_weight,
+        "pci": pci_weight,
+        "distancia": distancia_weight,  # Métrica inversa (Proximidade)
+    }
+
+    st.markdown("---")
+
+    # 1. Obter Tabela de Referência de Códigos HS e Descrições
+    # Filtra códigos HS inválidos ou vazios
+    df_referencia = comexstat_df[["headingCode", "heading"]].drop_duplicates()
+    df_referencia = df_referencia.rename(columns={"heading": "Descrição"})
+    df_referencia = df_referencia[
+        df_referencia["headingCode"].notna()
+        & (df_referencia["headingCode"] != "0")
+        & (df_referencia["headingCode"].str.len() > 1)
+    ]
+
+    # 2. Cálculo e obtenção das métricas
+    df_vcr_ce_br = calcular_vcr_ceara_brasil(comexstat_df)
+    df_vcr_br_md = obter_vcr_brasil_mundo(harvard_df)
+    df_pci_dist = obter_pci_e_distancia(harvard_df)
+
+    # 3. Consolidação dos DataFrames
+    df_final = df_referencia.merge(df_vcr_ce_br, on="headingCode", how="left")
+    df_final = df_final.merge(df_vcr_br_md, on="headingCode", how="left")
+    df_final = df_final.merge(df_pci_dist, on="headingCode", how="left")
+
+    # 4. IMPLEMENTAÇÃO: Normalização dos VCRs Tradicionais (Estadual/País) e Distância (para PCI)
+    df_final = normalizar_vcr(df_final, "VCR_Ceara_Brasil")
+    df_final = normalizar_vcr(df_final, "VCR_Brasil_Mundo")
+    # Normalização do PCI
+    df_final = normalizar_vcr(df_final, "PCI")
+    # Normalização da Distância (Bruta)
+    df_final = normalizar_vcr(df_final, "Distancia_Parceiros")
+
+    # 5. IMPLEMENTAÇÃO: Cálculo do VCR Ajustado (Municipal/Setorial) e sua Normalização (Lógica do anexo)
+    # Nota: Este é um PLACEHOLDER, pois os dados municipais/setoriais (Empregos, PIB, etc.) não estão carregados.
+    df_final = calcular_vcr_ajustado(df_final)
+
+    # 6. IMPLEMENTAÇÃO: Cálculo do Índice de Prioridade Ajustado
+    df_final = calcular_indice_prioridade_ajustado(df_final, pesos_dict)
+
+    # 7. Formatação da Tabela
+    df_final = df_final.rename(
+        columns={
+            "headingCode": "Código HS",
+            "VCR_Ceara_Brasil": "VCR estadual (Bruto)",
+            "VCR_Ceara_Brasil_NORM": "VCR estadual normalizada",
+            "VCR_Brasil_Mundo": "VCR país (Bruto)",
+            "VCR_Brasil_Mundo_NORM": "VCR país normalizada",
+            "Distancia_Parceiros": "distância entre parceiros (Bruto)",
+            "Distancia_Parceiros_NORM": "distância entre parceiros normalizada",
+            "PCI": "PCI (Bruto)",
+            "PCI_NORM": "PCI normalizado",
+            "VCR_AJUSTADO": "VCR Ajustado (Bruto)",
+            "VCR_AJUSTADO_NORM": "VCR Ajustado normalizado",
+            "INDICE_PRIORIDADE_AJUSTADO": "Índice de Prioridade Ajustado",
+        }
+    )
+
+    # Arredondamento e limpeza
+    cols_to_round = [
+        "VCR estadual (Bruto)",
+        "VCR país (Bruto)",
+        "VCR estadual normalizada",
+        "VCR país normalizada",
+        "distância entre parceiros (Bruto)",
+        "PCI (Bruto)",
+        "VCR Ajustado (Bruto)",
+        "VCR Ajustado normalizado",
+        "PCI normalizado",
+        "distância entre parceiros normalizada",
+        "Índice de Prioridade Ajustado",
+    ]
+
+    for col in cols_to_round:
+        df_final[col] = pd.to_numeric(df_final[col], errors="coerce").round(3)
+
+    # Substituir NaN por 'N/A'
+    df_final = df_final.fillna("N/A")
+
+    # Ordenação final pela nova métrica ajustada
+    df_final_sorted = df_final.sort_values(
+        by=["Índice de Prioridade Ajustado"],
+        key=lambda x: pd.to_numeric(x, errors="coerce"),
+        ascending=False,
+    )
+
+    # Exibição da Tabela Consolidada
+    st.subheader("Tabela de Especialização e Complexidade Ponderada")
+    st.info(
+        "A tabela é ordenada pelo **Índice de Prioridade Ajustado**, que combina as métricas normalizadas com os pesos definidos nos sliders."
+    )
+
+    # Colunas finais a serem exibidas (foco nas métricas normalizadas e no Índice)
+    column_order = [
+        "Código HS",
+        "Descrição",
+        "VCR estadual normalizada",
+        "VCR país normalizada",
+        "VCR Ajustado normalizado",
+        "PCI normalizado",
+        "distância entre parceiros normalizada",
+        "Índice de Prioridade Ajustado",
+    ]
+
+    # Exibir as métricas brutas também, em uma seção expansível
+    with st.expander("Visualizar Métrica Brutas"):
+        st.dataframe(
+            df_final_sorted[
+                [
+                    "Código HS",
+                    "Descrição",
+                    "VCR estadual (Bruto)",
+                    "VCR país (Bruto)",
+                    "VCR Ajustado (Bruto)",
+                    "PCI (Bruto)",
+                    "distância entre parceiros (Bruto)",
+                ]
+            ],
+            width="stretch",
+        )
+
+    st.dataframe(
+        df_final_sorted[column_order],
+        width="stretch",
+    )
+
+    # Espaço para os sumários originais
+    st.markdown("---")
+    st.subheader("Dados Sumarizados (Originais)")
+
+    col1, col2, col3 = st.columns(3)
+
+    # Coluna 1: Resumo ComexStat
+    with col1:
+        st.subheader("ComexStat")
+        st.markdown("Sumário de valores FOB por estado.")
+        if not comexstat_df.empty:
+            summary = comexstat_df.groupby("state")["metricFOB"].sum().reset_index()
+            st.dataframe(summary, width="stretch")
+
+    # Coluna 2: Resumo Harvard
+    with col2:
+        st.subheader("Harvard Dataverse")
+        st.markdown("Total de exportação e importação por ano.")
+        if not harvard_df.empty:
+            summary = (
+                harvard_df.groupby("year")
+                .agg({"export_value": "sum", "import_value": "sum"})
+                .reset_index()
+            )
+            st.dataframe(summary, width="stretch")
+
+    # Coluna 3: Resumo Comtrade
+    with col3:
+        st.subheader("Comtrade")
+        st.markdown("Valor primário total por ano.")
+        if not comtrade_df.empty:
+            summary = comtrade_df.groupby("refYear")["primaryValue"].sum().reset_index()
+            st.dataframe(summary, width="stretch")
 
 # %%
 # Aba ComexStat
@@ -920,234 +1156,3 @@ with tab_comtrade:
             title="Distribuição do Valor Primário por Descrição do Produto",
         )
         st.plotly_chart(fig, use_container_width=True)
-
-# %%
-# Aba Análise Comparativa
-with tab_compare:
-    st.header("Análise Comparativa de Especialização e Complexidade")
-    st.markdown(
-        "Consolidação de métricas de VCR (Vantagem Comparativa Revelada), Distância e PCI (Índice de Complexidade de Produtos) por Código HS."
-    )
-
-    # --- 0. Controles de Pesos (Sidebar para tempo real) ---
-    st.markdown("### 🎚️ Ajuste de Pesos para o Índice de Prioridade")
-    st.markdown(
-        "Utilize os sliders para definir a importância de cada métrica no **Índice de Prioridade Ajustado**."
-    )
-
-    col_vcr_ce, col_vcr_br, col_vcr_aj, col_pci, col_dist = st.columns(5)
-
-    # Pesos para as 3 VCRs (sub-componentes do 'Índice VCR Composto')
-    vcr_ceara_weight = col_vcr_ce.slider(
-        "Peso VCR Estadual",
-        0.0,
-        1.0,
-        0.4,
-        0.05,
-        key="w_vcr_ceara",
-        help="Prioriza VCR do estado (Ceará/Brasil).",
-    )
-    vcr_brasil_weight = col_vcr_br.slider(
-        "Peso VCR País",
-        0.0,
-        1.0,
-        0.3,
-        0.05,
-        key="w_vcr_brasil",
-        help="Prioriza VCR do país (Brasil/Mundo).",
-    )
-    vcr_ajustado_weight = col_vcr_aj.slider(
-        "Peso VCR Ajustado",
-        0.0,
-        1.0,
-        0.3,
-        0.05,
-        key="w_vcr_ajustado",
-        help="Prioriza o VCR Ajustado (baseado na Complexidade Local).",
-    )
-
-    # Pesos para PCI e Distância (componentes de topo)
-    pci_weight = col_pci.slider(
-        "Peso PCI",
-        0.0,
-        1.0,
-        0.3,
-        0.05,
-        key="w_pci",
-        help="Prioriza a Complexidade do Produto (PCI).",
-    )
-    distancia_weight = col_dist.slider(
-        "Peso Distância",
-        0.0,
-        1.0,
-        0.4,
-        0.05,
-        key="w_distancia",
-        help="Prioriza a Proximidade dos Parceiros (1 - Distância).",
-    )
-
-    # Dicionário de Pesos
-    pesos_dict = {
-        "vcr_ceara": vcr_ceara_weight,
-        "vcr_brasil": vcr_brasil_weight,
-        "vcr_ajustado": vcr_ajustado_weight,
-        "pci": pci_weight,
-        "distancia": distancia_weight,  # Métrica inversa (Proximidade)
-    }
-
-    st.markdown("---")
-
-    # 1. Obter Tabela de Referência de Códigos HS e Descrições
-    # Filtra códigos HS inválidos ou vazios
-    df_referencia = comexstat_df[["headingCode", "heading"]].drop_duplicates()
-    df_referencia = df_referencia.rename(columns={"heading": "Descrição"})
-    df_referencia = df_referencia[
-        df_referencia["headingCode"].notna()
-        & (df_referencia["headingCode"] != "0")
-        & (df_referencia["headingCode"].str.len() > 1)
-    ]
-
-    # 2. Cálculo e obtenção das métricas
-    df_vcr_ce_br = calcular_vcr_ceara_brasil(comexstat_df)
-    df_vcr_br_md = obter_vcr_brasil_mundo(harvard_df)
-    df_pci_dist = obter_pci_e_distancia(harvard_df)
-
-    # 3. Consolidação dos DataFrames
-    df_final = df_referencia.merge(df_vcr_ce_br, on="headingCode", how="left")
-    df_final = df_final.merge(df_vcr_br_md, on="headingCode", how="left")
-    df_final = df_final.merge(df_pci_dist, on="headingCode", how="left")
-
-    # 4. IMPLEMENTAÇÃO: Normalização dos VCRs Tradicionais (Estadual/País) e Distância (para PCI)
-    df_final = normalizar_vcr(df_final, "VCR_Ceara_Brasil")
-    df_final = normalizar_vcr(df_final, "VCR_Brasil_Mundo")
-    # Normalização do PCI
-    df_final = normalizar_vcr(df_final, "PCI")
-    # Normalização da Distância (Bruta)
-    df_final = normalizar_vcr(df_final, "Distancia_Parceiros")
-
-    # 5. IMPLEMENTAÇÃO: Cálculo do VCR Ajustado (Municipal/Setorial) e sua Normalização (Lógica do anexo)
-    # Nota: Este é um PLACEHOLDER, pois os dados municipais/setoriais (Empregos, PIB, etc.) não estão carregados.
-    df_final = calcular_vcr_ajustado(df_final)
-
-    # 6. IMPLEMENTAÇÃO: Cálculo do Índice de Prioridade Ajustado
-    df_final = calcular_indice_prioridade_ajustado(df_final, pesos_dict)
-
-    # 7. Formatação da Tabela
-    df_final = df_final.rename(
-        columns={
-            "headingCode": "Código HS",
-            "VCR_Ceara_Brasil": "VCR estadual (Bruto)",
-            "VCR_Ceara_Brasil_NORM": "VCR estadual normalizada",
-            "VCR_Brasil_Mundo": "VCR país (Bruto)",
-            "VCR_Brasil_Mundo_NORM": "VCR país normalizada",
-            "Distancia_Parceiros": "distância entre parceiros (Bruto)",
-            "Distancia_Parceiros_NORM": "distância entre parceiros normalizada",
-            "PCI": "PCI (Bruto)",
-            "PCI_NORM": "PCI normalizado",
-            "VCR_AJUSTADO": "VCR Ajustado (Bruto)",
-            "VCR_AJUSTADO_NORM": "VCR Ajustado normalizado",
-            "INDICE_PRIORIDADE_AJUSTADO": "Índice de Prioridade Ajustado",
-        }
-    )
-
-    # Arredondamento e limpeza
-    cols_to_round = [
-        "VCR estadual (Bruto)",
-        "VCR país (Bruto)",
-        "VCR estadual normalizada",
-        "VCR país normalizada",
-        "distância entre parceiros (Bruto)",
-        "PCI (Bruto)",
-        "VCR Ajustado (Bruto)",
-        "VCR Ajustado normalizado",
-        "PCI normalizado",
-        "distância entre parceiros normalizada",
-        "Índice de Prioridade Ajustado",
-    ]
-
-    for col in cols_to_round:
-        df_final[col] = pd.to_numeric(df_final[col], errors="coerce").round(3)
-
-    # Substituir NaN por 'N/A'
-    df_final = df_final.fillna("N/A")
-
-    # Ordenação final pela nova métrica ajustada
-    df_final_sorted = df_final.sort_values(
-        by=["Índice de Prioridade Ajustado"],
-        key=lambda x: pd.to_numeric(x, errors="coerce"),
-        ascending=False,
-    )
-
-    # Exibição da Tabela Consolidada
-    st.subheader("Tabela de Especialização e Complexidade Ponderada")
-    st.info(
-        "A tabela é ordenada pelo **Índice de Prioridade Ajustado**, que combina as métricas normalizadas com os pesos definidos nos sliders."
-    )
-
-    # Colunas finais a serem exibidas (foco nas métricas normalizadas e no Índice)
-    column_order = [
-        "Código HS",
-        "Descrição",
-        "VCR estadual normalizada",
-        "VCR país normalizada",
-        "VCR Ajustado normalizado",
-        "PCI normalizado",
-        "distância entre parceiros normalizada",
-        "Índice de Prioridade Ajustado",
-    ]
-
-    # Exibir as métricas brutas também, em uma seção expansível
-    with st.expander("Visualizar Métrica Brutas"):
-        st.dataframe(
-            df_final_sorted[
-                [
-                    "Código HS",
-                    "Descrição",
-                    "VCR estadual (Bruto)",
-                    "VCR país (Bruto)",
-                    "VCR Ajustado (Bruto)",
-                    "PCI (Bruto)",
-                    "distância entre parceiros (Bruto)",
-                ]
-            ],
-            width="stretch",
-        )
-
-    st.dataframe(
-        df_final_sorted[column_order],
-        width="stretch",
-    )
-
-    # Espaço para os sumários originais
-    st.markdown("---")
-    st.subheader("Dados Sumarizados (Originais)")
-
-    col1, col2, col3 = st.columns(3)
-
-    # Coluna 1: Resumo ComexStat
-    with col1:
-        st.subheader("ComexStat")
-        st.markdown("Sumário de valores FOB por estado.")
-        if not comexstat_df.empty:
-            summary = comexstat_df.groupby("state")["metricFOB"].sum().reset_index()
-            st.dataframe(summary, width="stretch")
-
-    # Coluna 2: Resumo Harvard
-    with col2:
-        st.subheader("Harvard Dataverse")
-        st.markdown("Total de exportação e importação por ano.")
-        if not harvard_df.empty:
-            summary = (
-                harvard_df.groupby("year")
-                .agg({"export_value": "sum", "import_value": "sum"})
-                .reset_index()
-            )
-            st.dataframe(summary, width="stretch")
-
-    # Coluna 3: Resumo Comtrade
-    with col3:
-        st.subheader("Comtrade")
-        st.markdown("Valor primário total por ano.")
-        if not comtrade_df.empty:
-            summary = comtrade_df.groupby("refYear")["primaryValue"].sum().reset_index()
-            st.dataframe(summary, width="stretch")

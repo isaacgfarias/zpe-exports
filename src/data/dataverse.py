@@ -3,6 +3,8 @@ import requests
 import polars as pl  # Alteração aqui para maior clareza
 from pyDataverse.api import NativeApi
 
+from core.config import HARVARD_API_KEY, HARVARD_BASE_URL, HARVARD_DOI
+
 
 def _get_api(api_token: str | None):
     if api_token is None:
@@ -18,23 +20,13 @@ def _get_api(api_token: str | None):
 class HarvardDataverse:
     def __init__(
         self,
-        base_url: str = "https://dataverse.harvard.edu",
-        api_token: str | None = None,
+        base_url: str = HARVARD_BASE_URL,
+        api_token: str | None = HARVARD_API_KEY,
     ):
         self.api_token = _get_api(api_token)
         self.BASE_URL = base_url
 
     def _download_files(self, doi: str, target_filename: str | None = None):
-        """
-        Baixa arquivos de um conjunto de dados do Harvard Dataverse.
-
-        Args:
-            self.api_token (str): O token da sua API Dataverse.
-            doi (str): O identificador DOI do conjunto de dados.
-            target_filename (str, opcional): O nome do arquivo específico a ser baixado.
-                                            Se None, todos os arquivos serão baixados.
-        """
-
         api = NativeApi(self.BASE_URL, self.api_token)
 
         download_dir = doi.replace(":", "_").replace("/", "_")
@@ -83,7 +75,10 @@ class HarvardDataverse:
         print("Processo de download concluído.")
 
     def import_df(
-        self, doi: str, target_filename: str = None, polars_reader_options: dict = None
+        self,
+        doi: str = HARVARD_DOI,
+        target_filename: str = None,
+        polars_reader_options: dict = None,
     ):
         """
         Baixa arquivos de um conjunto de dados do Harvard Dataverse e os retorna como DataFrames.

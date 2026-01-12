@@ -3,7 +3,7 @@ import os
 
 
 def comtrade():
-    from comtrade import Comtrade
+    from data.comtrade import Comtrade
 
     comtrade = Comtrade()
     comtrade_df = pl.DataFrame(
@@ -20,7 +20,7 @@ def comtrade():
 
 
 def harvard():
-    from dataverse import HarvardDataverse
+    from data.dataverse import HarvardDataverse
 
     TOKEN = os.getenv("HARVARD_API_KEY")
     DOI: str = "doi:10.7910/DVN/T4CHWJ"
@@ -40,12 +40,12 @@ def harvard():
 
 
 def comexstat():
-    from comexstat import Comexstat
+    from data.comexstat import Comexstat
 
-    comex = ComexStat()
+    comex = Comexstat()
     comexstat_df = comex.query_comexstat_data(
         flow="export",
-        period_from="2023-01",
+        period_from="2021-01",
         period_to="2023-12",
         # filters=[{"filter": "state", "values": [23]}],
         metrics=["metricFOB"],
@@ -55,16 +55,16 @@ def comexstat():
 
 
 if __name__ == "__main__":
-    print("Comexstat schema:")
+    # print("Comexstat schema:")
     # comexstat_df = comexstat()
     # print(comexstat_df.schema)
     # comexstat_df.write_csv("resources/comexstat_data.csv")
 
-    print("\nHarvard schema:")
-    # harvard_df = pl.read_csv(
-    #     "Dashboard-Base/harvard_data.csv",
-    #     schema_overrides={"product_hs92_code": pl.Utf8},
-    # )
+    # print("\nHarvard schema:")
+    # # harvard_df = pl.read_csv(
+    # #     "Dashboard-Base/harvard_data.csv",
+    # #     schema_overrides={"product_hs92_code": pl.Utf8},
+    # # )
     # harvard_df = harvard()
     # print(harvard_df.schema)
     # harvard_df.write_csv("resources/harvard_data.csv")

@@ -41,25 +41,6 @@ class Comtrade:
     def query_data(
         self, save_csv=False, max_records=None, **filters: Dict[str, Any]
     ) -> pd.DataFrame:
-        """
-        Fetch trade data from the UN Comtrade API using comtradeapicall library.
-
-        Parameters
-        ----------
-        subscription_key : str, optional
-            Your UN Comtrade API key. If None, will read from environment variable 'COMTRADE_API_KEY'.
-        save_csv : bool, optional
-            Whether to save results as a CSV file (default False).
-        max_records : int, optional
-            Maximum number of records to fetch (default 100).
-        filters : dict
-            Any additional filters supported by the API.
-
-        Returns
-        -------
-        pd.DataFrame
-            A pandas DataFrame with the trade data.
-        """
         if self.comtrade_key is None:
             self.comtrade_key = os.getenv("COMTRADE_API_KEY")
             if not self.comtrade_key:
@@ -77,7 +58,7 @@ class Comtrade:
             cmdCode="AG4",
             flowCode="X",
             partnerCode="76",
-            partner2Code="0",
+            partner2Code=None,
             customsCode="C00",
             motCode=None,
             maxRecords=None,
