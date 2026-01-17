@@ -9,12 +9,18 @@ from core.analytics import (
     normalizar_vcr,
     format_fob_metric,
     carregar_mapeamento_ncm_cnae,
+    classificar_cenarios_vcr,
+    calcular_indice_prioridade_ajustado,
 )
 from core.priority_index import calcular_indice_prioridade_ajustado
 from core.vcr_calculators import calcular_vcr_dentro_selecao
 
 
 def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
+    """
+    Renderiza a aba de Análise Comparativa consolidando métricas SH4,
+    mapeamento NCM/CNAE e os 7 Cenários Estratégicos.
+    """
     st.header("Análise Comparativa de Especialização e Complexidade")
 
     # --- 0. Controles de Pesos ---
@@ -28,32 +34,33 @@ def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
         "distancia": col_dist.slider("Peso Distância", 0.0, 1.0, 0.4, 0.05),
     }
 
-    # --- 1. Processamento e Consolidação ---
-    with st.spinner("Consolidando métricas e mapeamentos industriais..."):
+    # --- 1. Processamento de Dados ---
+    with st.spinner("Consolidando métricas e classificando cenários..."):
         # Métricas base (SH4)
         df_ce = calcular_vcr_ceara_brasil(comexstat_df)
         df_br = obter_vcr_brasil_mundo(harvard_df)
         df_metrics = obter_pci_e_distancia(harvard_df)
 
+        # Descrições dos códigos HS
         df_descricoes = comexstat_df[["headingCode", "heading"]].drop_duplicates()
         df_descricoes["headingCode"] = (
             df_descricoes["headingCode"].astype(str).str.zfill(4)
         )
 
-        # Cruzamento das métricas
+        # Merge principal
         df_final = df_ce.merge(df_br, on="headingCode", how="left")
         df_final = df_final.merge(df_metrics, on="headingCode", how="left")
         df_final["headingCode"] = df_final["headingCode"].astype(str).str.zfill(4)
         df_final = df_final.merge(df_descricoes, on="headingCode", how="left").fillna(0)
 
-        # --- CARREGAMENTO E AGRUPAMENTO NCM/CNAE ---
+        # --- CARREGAMENTO DO MAPEAMENTO NCM/CNAE ---
         PATH_MAP = "resources/NCM2012XCNAE20.xls"
         try:
-            df_map_raw = pd.read_excel(PATH_MAP, skiprows=1, engine="xlrd")
-            df_map_raw = df_map_raw.iloc[:, :3]  # Colunas: NCM, Descrição, CNAE
+            # Lê apenas as 3 primeiras colunas do Excel
+            df_map_raw = pd.read_excel(PATH_MAP, skiprows=1, engine="xlrd").iloc[:, :3]
             df_map_raw.columns = ["ncm_raw", "desc_ncm", "cnae_raw"]
 
-            # Limpeza: NCM para 8 dígitos e SH4 para 4 dígitos
+            # Limpeza e criação da chave HS4
             df_map_raw["ncm8"] = (
                 df_map_raw["ncm_raw"]
                 .astype(str)
@@ -62,8 +69,7 @@ def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
             )
             df_map_raw["headingCode"] = df_map_raw["ncm8"].str[:4]
 
-            # Agrupando NCMs e CNAEs por SH4 para não duplicar linhas na tabela principal
-            # Criamos strings separadas por vírgula
+            # Agrupamento para exibição em linha única
             df_ponte = (
                 df_map_raw.groupby("headingCode")
                 .agg(
@@ -79,81 +85,89 @@ def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
                 .reset_index()
             )
 
-            # Merge com a tabela principal
             df_final = df_final.merge(df_ponte, on="headingCode", how="left")
-            df_final["ncm8"] = df_final["ncm8"].fillna("Não disp.")
-            df_final["cnae_raw"] = df_final["cnae_raw"].fillna("Não disp.")
-
         except Exception as e:
-            st.warning(f"Aviso: Mapeamento NCM/CNAE não pôde ser integrado: {e}")
-            df_final["ncm8"] = "Erro carga"
-            df_final["cnae_raw"] = "Erro carga"
+            st.warning(f"Aviso: Não foi possível carregar o Tradutor NCM/CNAE: {e}")
+            df_final["ncm8"] = "Não disp."
+            df_final["cnae_raw"] = "Não disp."
 
-        # --- 2. Filtros e Cálculos Finais ---
-        all_codes = sorted(df_final["headingCode"].unique().tolist())
-        col_start, col_end = st.columns(2)
-        start_val = col_start.selectbox("Código HS Inicial", ["Início"] + all_codes)
-        end_val = col_end.selectbox("Código HS Final", ["Fim"] + all_codes)
+        # Aplica a lógica dos 7 cenários (Classificação Baseada na Imagem)
+        df_final = classificar_cenarios_vcr(df_final)
 
-        if start_val != "Início":
-            df_final = df_final[df_final["headingCode"] >= start_val]
-        if end_val != "Fim":
-            df_final = df_final[df_final["headingCode"] <= end_val]
+        # Normalização e Cálculo do Índice de Prioridade
+        for col in [
+            "VCR_Ceara_Brasil",
+            "VCR_Brasil_Mundo",
+            "PCI",
+            "Distancia_Parceiros",
+        ]:
+            df_final = normalizar_vcr(df_final, col)
 
-        if not df_final.empty:
-            for col in [
-                "VCR_Ceara_Brasil",
-                "VCR_Brasil_Mundo",
-                "PCI",
-                "Distancia_Parceiros",
-            ]:
-                df_final = normalizar_vcr(df_final, col)
-            df_final = calcular_indice_prioridade_ajustado(df_final, pesos_dict)
-            df_final = df_final.sort_values(
-                by="INDICE_PRIORIDADE_AJUSTADO", ascending=False
-            )
+        df_final = calcular_indice_prioridade_ajustado(df_final, pesos_dict)
+        df_final = df_final.sort_values(
+            by="INDICE_PRIORIDADE_AJUSTADO", ascending=False
+        )
+
+    # --- 2. Filtros de Interface ---
+    st.markdown("---")
+    col_f1, col_f2 = st.columns(2)
+
+    all_codes = sorted(df_final["headingCode"].unique().tolist())
+    start_hs = col_f1.selectbox("Filtrar HS (Início)", ["Início"] + all_codes)
+
+    cenarios = ["Todos"] + sorted(df_final["Cenário Estratégico"].unique().tolist())
+    filtro_cenario = col_f2.selectbox("Filtrar por Cenário Estratégico", cenarios)
+
+    # Aplicação dos filtros
+    df_view = df_final.copy()
+    if start_hs != "Início":
+        df_view = df_view[df_view["headingCode"] >= start_hs]
+    if filtro_cenario != "Todos":
+        df_view = df_view[df_view["Cenário Estratégico"] == filtro_cenario]
 
     # --- 3. Exibição da Tabela Principal ---
-    if not df_final.empty:
-        # Mapeamento de nomes para o usuário
+    if not df_view.empty:
         mapping = {
             "headingCode": "HS4",
             "heading": "Produto (SH4)",
-            "ncm8": "NCMs Relacionados (8d)",
+            "Cenário Estratégico": "Posicionamento Estratégico",
+            "ncm8": "NCMs Relacionados",
             "cnae_raw": "CNAE 2.0",
             "INDICE_PRIORIDADE_AJUSTADO": "Prioridade",
             "VCR_Ceara_Brasil": "VCR Est.",
             "VCR_Brasil_Mundo": "VCR Nac.",
-            "PCI": "PCI",
-            "Distancia_Parceiros": "Dist.",
         }
 
-        cols_to_show = [
+        cols_display = [
             "headingCode",
             "heading",
+            "Cenário Estratégico",
             "ncm8",
             "cnae_raw",
             "INDICE_PRIORIDADE_AJUSTADO",
             "VCR_Ceara_Brasil",
             "VCR_Brasil_Mundo",
-            "PCI",
-            "Distancia_Parceiros",
         ]
 
         st.dataframe(
-            df_final[cols_to_show].rename(columns=mapping),
+            df_view[cols_display].rename(columns=mapping),
             use_container_width=True,
             hide_index=True,
             column_config={
                 "Prioridade": st.column_config.ProgressColumn(
                     format="%.2f", min_value=0, max_value=1
                 ),
-                "NCMs Relacionados (8d)": st.column_config.TextColumn(width="medium"),
-                "CNAE 2.0": st.column_config.TextColumn(width="small"),
+                "Posicionamento Estratégico": st.column_config.TextColumn(
+                    width="large"
+                ),
+                "NCMs Relacionados": st.column_config.TextColumn(width="medium"),
             },
         )
+
+        csv = df_view[cols_display].to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Baixar Relatório", csv, "priorizacao.csv", "text/csv")
     else:
-        st.error("Sem dados para os critérios selecionados.")
+        st.info("Nenhum dado encontrado para os filtros aplicados.")
 
 
 def render_tab_comex(comexstat_df):

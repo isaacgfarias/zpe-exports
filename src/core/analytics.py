@@ -193,6 +193,48 @@ def filtrar_mapeamento_por_cliente(
     return df_filtered
 
 
+def classificar_cenarios_vcr(df):
+    """
+    Classifica os produtos em 7 cenários estratégicos baseados no
+    cruzamento da VCR Estadual (Ceará) e VCR Nacional (Brasil).
+    """
+
+    def definir_regra(row):
+        vce = row.get("VCR_Ceara_Brasil", 0)
+        vbr = row.get("VCR_Brasil_Mundo", 0)
+
+        # Cenário 1: Alta competitividade em ambos
+        if vce > 1 and vbr > 1:
+            return "1. Sinergia: Especialização Consolidada (Local e Nacional)"
+
+        # Cenário 2: Ceará forte, Brasil não
+        elif vce > 1 and vbr <= 1:
+            return "2. Diferencial Regional: Especialização Exclusiva do Estado"
+
+        # Cenário 3: Brasil forte, Ceará não (Oportunidade de captura)
+        elif vce <= 1 and vbr > 1:
+            return "3. Oportunidade: Potencial de Ganho de Market Share Nacional"
+
+        # Cenário 4: Transição Positiva (Ambos moderados/crescentes)
+        elif 0.5 < vce <= 1 and 0.5 < vbr <= 1:
+            return "4. Setor Emergente: Em Maturação em Ambos os Níveis"
+
+        # Cenário 5: Nicho em formação no Estado
+        elif 0.5 < vce <= 1 and vbr <= 0.5:
+            return "5. Nicho: Desenvolvimento Inicial no Estado"
+
+        # Cenário 6: Presença Nacional com vácuo local
+        elif vce <= 0.5 and 0.5 < vbr <= 1:
+            return "6. Retaguarda: Presença Nacional sem Reflexo Local"
+
+        # Cenário 7: Baixa prioridade competitiva
+        else:
+            return "7. Incipiente: Baixa Especialização em Ambos os Níveis"
+
+    df["Cenário Estratégico"] = df.apply(definir_regra, axis=1)
+    return df
+
+
 # def calcular_indice_prioridade_ajustado(df: pd.DataFrame, pesos: dict) -> pd.DataFrame:
 #     """
 #     Calcula o Índice de Prioridade Ajustado removendo a métrica de VCR Ajustado

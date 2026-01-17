@@ -1,6 +1,6 @@
 # %%
 import streamlit as st
-import pandas as pd  # Importação mantida para tipagem e operações básicas
+# import pandas as pd  # Importação mantida para tipagem e operações básicas
 
 # Importação dos módulos refatorados
 from core.data_loader import get_all_data
