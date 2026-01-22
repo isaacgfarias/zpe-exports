@@ -18,49 +18,32 @@ from core.vcr_calculators import calcular_vcr_dentro_selecao
 
 def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
     """
-    Renderiza a aba de Análise Comparativa consolidando métricas SH4,
-    mapeamento NCM/CNAE e os 7 Cenários Estratégicos.
+    Renderiza a aba de Análise Comparativa com UX otimizada:
+    Filtros e pesos ocultos em expander e suporte a seleção múltipla de cenários.
     """
     st.header("Análise Comparativa de Especialização e Complexidade")
 
-    # --- 0. Controles de Pesos ---
-    st.markdown("### 🎚️ Ajuste de Pesos para o Índice de Prioridade")
-    col_vcr_ce, col_vcr_br, col_pci, col_dist = st.columns(4)
-
-    pesos_dict = {
-        "vcr_ceara": col_vcr_ce.slider("Peso VCR Estadual", 0.0, 1.0, 0.4, 0.05),
-        "vcr_brasil": col_vcr_br.slider("Peso VCR País", 0.0, 1.0, 0.3, 0.05),
-        "pci": col_pci.slider("Peso PCI", 0.0, 1.0, 0.3, 0.05),
-        "distancia": col_dist.slider("Peso Distância", 0.0, 1.0, 0.4, 0.05),
-    }
-
-    # --- 1. Processamento de Dados ---
-    with st.spinner("Consolidando métricas e classificando cenários..."):
-        # Métricas base (SH4)
+    # --- 1. Processamento Inicial de Dados (Necessário para popular os filtros) ---
+    with st.spinner("Preparando motor de busca..."):
         df_ce = calcular_vcr_ceara_brasil(comexstat_df)
         df_br = obter_vcr_brasil_mundo(harvard_df)
         df_metrics = obter_pci_e_distancia(harvard_df)
 
-        # Descrições dos códigos HS
         df_descricoes = comexstat_df[["headingCode", "heading"]].drop_duplicates()
         df_descricoes["headingCode"] = (
             df_descricoes["headingCode"].astype(str).str.zfill(4)
         )
 
-        # Merge principal
         df_final = df_ce.merge(df_br, on="headingCode", how="left")
         df_final = df_final.merge(df_metrics, on="headingCode", how="left")
         df_final["headingCode"] = df_final["headingCode"].astype(str).str.zfill(4)
         df_final = df_final.merge(df_descricoes, on="headingCode", how="left").fillna(0)
 
-        # --- CARREGAMENTO DO MAPEAMENTO NCM/CNAE ---
+        # Mapeamento NCM/CNAE
         PATH_MAP = "resources/NCM2012XCNAE20.xls"
         try:
-            # Lê apenas as 3 primeiras colunas do Excel
             df_map_raw = pd.read_excel(PATH_MAP, skiprows=1, engine="xlrd").iloc[:, :3]
             df_map_raw.columns = ["ncm_raw", "desc_ncm", "cnae_raw"]
-
-            # Limpeza e criação da chave HS4
             df_map_raw["ncm8"] = (
                 df_map_raw["ncm_raw"]
                 .astype(str)
@@ -69,7 +52,6 @@ def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
             )
             df_map_raw["headingCode"] = df_map_raw["ncm8"].str[:4]
 
-            # Agrupamento para exibição em linha única
             df_ponte = (
                 df_map_raw.groupby("headingCode")
                 .agg(
@@ -84,55 +66,68 @@ def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
                 )
                 .reset_index()
             )
-
             df_final = df_final.merge(df_ponte, on="headingCode", how="left")
-        except Exception as e:
-            st.warning(f"Aviso: Não foi possível carregar o Tradutor NCM/CNAE: {e}")
+        except:
             df_final["ncm8"] = "Não disp."
             df_final["cnae_raw"] = "Não disp."
 
-        # Aplica a lógica dos 7 cenários (Classificação Baseada na Imagem)
+        # Classificação dos 7 Cenários
         df_final = classificar_cenarios_vcr(df_final)
 
-        # Normalização e Cálculo do Índice de Prioridade
-        for col in [
-            "VCR_Ceara_Brasil",
-            "VCR_Brasil_Mundo",
-            "PCI",
-            "Distancia_Parceiros",
-        ]:
-            df_final = normalizar_vcr(df_final, col)
+    # --- 2. ÁREA DE CONFIGURAÇÃO E FILTROS (UX: Expander) ---
+    with st.expander("🛠️ Configurações de Pesos e Filtros Avançados", expanded=False):
+        st.markdown("#### ⚖️ Ajuste de Pesos (Índice de Prioridade)")
+        c_p1, c_p2, c_p3, c_p4 = st.columns(4)
+        pesos_dict = {
+            "vcr_ceara": c_p1.slider("Peso VCR Estadual", 0.0, 1.0, 0.4, 0.05),
+            "vcr_brasil": c_p2.slider("Peso VCR País", 0.0, 1.0, 0.3, 0.05),
+            "pci": c_p3.slider("Peso PCI", 0.0, 1.0, 0.3, 0.05),
+            "distancia": c_p4.slider("Peso Distância", 0.0, 1.0, 0.4, 0.05),
+        }
 
-        df_final = calcular_indice_prioridade_ajustado(df_final, pesos_dict)
-        df_final = df_final.sort_values(
-            by="INDICE_PRIORIDADE_AJUSTADO", ascending=False
+        st.markdown("---")
+        st.markdown("#### 🔍 Filtros de Visualização")
+        col_f1, col_f2, col_f3 = st.columns([1, 1, 2])
+
+        # Filtro de Faixa HS
+        all_codes = sorted(df_final["headingCode"].unique().tolist())
+        start_hs = col_f1.selectbox("HS Inicial", ["Início"] + all_codes)
+        end_hs = col_f2.selectbox("HS Final", ["Fim"] + all_codes)
+
+        # Filtro de Posicionamento Estratégico (Multiselect)
+        cenarios_disponiveis = sorted(df_final["Cenário Estratégico"].unique().tolist())
+        selected_cenarios = col_f3.multiselect(
+            "Posicionamento Estratégico",
+            options=cenarios_disponiveis,
+            default=cenarios_disponiveis,
+            help="Selecione um ou mais cenários para filtrar a tabela",
         )
 
-    # --- 2. Filtros de Interface ---
-    st.markdown("---")
-    col_f1, col_f2 = st.columns(2)
+    # --- 3. Cálculos Finais e Aplicação de Filtros ---
+    # Normalização e Índice
+    for col in ["VCR_Ceara_Brasil", "VCR_Brasil_Mundo", "PCI", "Distancia_Parceiros"]:
+        df_final = normalizar_vcr(df_final, col)
+    df_final = calcular_indice_prioridade_ajustado(df_final, pesos_dict)
 
-    all_codes = sorted(df_final["headingCode"].unique().tolist())
-    start_hs = col_f1.selectbox("Filtrar HS (Início)", ["Início"] + all_codes)
-
-    cenarios = ["Todos"] + sorted(df_final["Cenário Estratégico"].unique().tolist())
-    filtro_cenario = col_f2.selectbox("Filtrar por Cenário Estratégico", cenarios)
-
-    # Aplicação dos filtros
+    # Aplicar Filtros
     df_view = df_final.copy()
     if start_hs != "Início":
         df_view = df_view[df_view["headingCode"] >= start_hs]
-    if filtro_cenario != "Todos":
-        df_view = df_view[df_view["Cenário Estratégico"] == filtro_cenario]
+    if end_hs != "Fim":
+        df_view = df_view[df_view["headingCode"] <= end_hs]
+    if selected_cenarios:
+        df_view = df_view[df_view["Cenário Estratégico"].isin(selected_cenarios)]
 
-    # --- 3. Exibição da Tabela Principal ---
+    df_view = df_view.sort_values(by="INDICE_PRIORIDADE_AJUSTADO", ascending=False)
+
+    # --- 4. Exibição da Tabela ---
     if not df_view.empty:
         mapping = {
             "headingCode": "HS4",
-            "heading": "Produto (SH4)",
+            "heading": "Produto",
             "Cenário Estratégico": "Posicionamento Estratégico",
-            "ncm8": "NCMs Relacionados",
-            "cnae_raw": "CNAE 2.0",
+            "ncm8": "NCMs",
+            "cnae_raw": "CNAE",
             "INDICE_PRIORIDADE_AJUSTADO": "Prioridade",
             "VCR_Ceara_Brasil": "VCR Est.",
             "VCR_Brasil_Mundo": "VCR Nac.",
@@ -160,14 +155,10 @@ def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
                 "Posicionamento Estratégico": st.column_config.TextColumn(
                     width="large"
                 ),
-                "NCMs Relacionados": st.column_config.TextColumn(width="medium"),
             },
         )
-
-        csv = df_view[cols_display].to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Baixar Relatório", csv, "priorizacao.csv", "text/csv")
     else:
-        st.info("Nenhum dado encontrado para os filtros aplicados.")
+        st.info("Nenhum dado corresponde aos filtros selecionados no expander acima.")
 
 
 def render_tab_comex(comexstat_df):
