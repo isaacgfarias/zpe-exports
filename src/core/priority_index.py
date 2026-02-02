@@ -21,44 +21,42 @@ def calcular_vcr_ajustado(df_metrics: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def calcular_indice_prioridade_ajustado(df: pd.DataFrame, pesos: dict) -> pd.DataFrame:
+def calcular_indice_prioridade_ajustado(df, pesos):
     """
-    Calcula o Índice de Prioridade SEM a métrica de VCR Ajustado.
-    Utiliza VCR Estadual, Nacional, PCI e Distância.
+    Calcula o índice final seguindo a lógica das colunas X, Y, Z, AA do .ods.
+    Multiplica os valores normalizados (Min-Max) pelos pesos definidos.
     """
+    # Criamos uma cópia para não gerar avisos de SettingWithCopy
     df_calc = df.copy()
 
-    # Recupera as colunas normalizadas (geradas individualmente no dashboard_tabs.py)
-    vcr_ce_norm = df_calc.get("VCR_Ceara_Brasil_NORM", 0).fillna(0)
-    vcr_br_norm = df_calc.get("VCR_Brasil_Mundo_NORM", 0).fillna(0)
-    pci_norm = df_calc.get("PCI_NORM", 0).fillna(0)
+    # Mapeamento das colunas normalizadas (garantindo que existam)
+    # Se a coluna não existir, cria-se uma série de zeros com o mesmo index do DF
+    vcr_ce_norm = (
+        df_calc["VCR_Ceara_Brasil_norm"]
+        if "VCR_Ceara_Brasil_norm" in df_calc.columns
+        else 0
+    )
+    vcr_br_norm = (
+        df_calc["VCR_Brasil_Mundo_norm"]
+        if "VCR_Brasil_Mundo_norm" in df_calc.columns
+        else 0
+    )
+    pci_norm = df_calc["PCI_norm"] if "PCI_norm" in df_calc.columns else 0
+    dist_norm = (
+        df_calc["Distancia_Parceiros_norm"]
+        if "Distancia_Parceiros_norm" in df_calc.columns
+        else 0
+    )
 
-    dist_norm = df_calc.get("Distancia_Parceiros_NORM", 0).fillna(0)
-    proximidade_norm = 1 - dist_norm  # Inverte distância para proximidade
+    # Lógica das colunas X, Y, Z, AA do .ods
+    df_calc["X"] = vcr_ce_norm * pesos.get("vcr_ceara", 0)
+    df_calc["Y"] = vcr_br_norm * pesos.get("vcr_brasil", 0)
+    df_calc["Z"] = pci_norm * pesos.get("pci", 0)
+    df_calc["AA"] = dist_norm * pesos.get("distancia", 0)
 
-    # 1. Cálculo do sub-índice de VCR (Estadual + Nacional)
-    peso_vcr_total = pesos["vcr_ceara"] + pesos["vcr_brasil"]
-
-    if peso_vcr_total > 0:
-        # Redistribui os pesos proporcionalmente apenas entre os dois VCRs existentes
-        peso_vcr_ceara = pesos["vcr_ceara"] / peso_vcr_total
-        peso_vcr_brasil = pesos["vcr_brasil"] / peso_vcr_total
-        indice_vcr = (vcr_ce_norm * peso_vcr_ceara) + (vcr_br_norm * peso_vcr_brasil)
-    else:
-        indice_vcr = (vcr_ce_norm + vcr_br_norm) / 2
-
-    # 2. Cálculo do Índice Final
-    # O VCR Composto tem peso fixo de 1 na proporção com PCI e Distância
-    peso_total_geral = 1 + pesos["pci"] + pesos["distancia"]
-
-    peso_vcr_composto = 1 / peso_total_geral
-    peso_pci = pesos["pci"] / peso_total_geral
-    peso_distancia = pesos["distancia"] / peso_total_geral
-
+    # Soma final (Coluna AC do .ods / Ranking da Planilha8)
     df_calc["INDICE_PRIORIDADE_AJUSTADO"] = (
-        (indice_vcr * peso_vcr_composto)
-        + (pci_norm * peso_pci)
-        + (proximidade_norm * peso_distancia)
+        df_calc["X"] + df_calc["Y"] + df_calc["Z"] + df_calc["AA"]
     )
 
     return df_calc

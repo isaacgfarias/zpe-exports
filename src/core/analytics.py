@@ -72,64 +72,59 @@ def obter_pci_e_distancia(df_harvard):
     )
 
 
-def normalizar_vcr(df: pd.DataFrame, coluna_vcr: str) -> pd.DataFrame:
+def normalizar_vcr(df, coluna):
     """
-    Normaliza uma coluna específica e cria uma nova com o sufixo _NORM.
+    Implementa a lógica das colunas M, N, O e P do .ods:
+    Formula: ((Valor - Min) / (Max - Min))
     """
-    coluna_norm = coluna_vcr + "_NORM"
+    min_val = df[coluna].min()
+    max_val = df[coluna].max()
 
-    # Garante que os dados sejam numéricos para o cálculo
-    vcr_numeric = pd.to_numeric(df[coluna_vcr], errors="coerce")
-
-    vcr_min = vcr_numeric.min()
-    vcr_max = vcr_numeric.max()
-
-    if vcr_max == vcr_min or pd.isna(vcr_min):
-        df[coluna_norm] = 0.0
+    # Evita divisão por zero caso todos os valores sejam iguais
+    if max_val == min_val:
+        df[f"{coluna}_norm"] = 0.0
     else:
-        df[coluna_norm] = (vcr_numeric - vcr_min) / (vcr_max - vcr_min)
+        df[f"{coluna}_norm"] = (df[coluna] - min_val) / (max_val - min_val)
 
     return df
 
 
-def calcular_indice_prioridade_ajustado(df: pd.DataFrame, pesos: dict) -> pd.DataFrame:
+def calcular_indice_prioridade_ajustado(df, pesos):
     """
-    Calcula o Índice de Prioridade SEM a métrica de VCR Ajustado.
-    Utiliza VCR Estadual, Nacional, PCI e Distância.
+    Calcula o índice final seguindo a lógica das colunas X, Y, Z, AA do .ods.
+    Multiplica os valores normalizados (Min-Max) pelos pesos definidos.
     """
+    # Criamos uma cópia para não gerar avisos de SettingWithCopy
     df_calc = df.copy()
 
-    # Recupera as colunas normalizadas (geradas individualmente no dashboard_tabs.py)
-    vcr_ce_norm = df_calc.get("VCR_Ceara_Brasil_NORM", 0).fillna(0)
-    vcr_br_norm = df_calc.get("VCR_Brasil_Mundo_NORM", 0).fillna(0)
-    pci_norm = df_calc.get("PCI_NORM", 0).fillna(0)
+    # Mapeamento das colunas normalizadas (garantindo que existam)
+    # Se a coluna não existir, cria-se uma série de zeros com o mesmo index do DF
+    vcr_ce_norm = (
+        df_calc["VCR_Ceara_Brasil_norm"]
+        if "VCR_Ceara_Brasil_norm" in df_calc.columns
+        else 0
+    )
+    vcr_br_norm = (
+        df_calc["VCR_Brasil_Mundo_norm"]
+        if "VCR_Brasil_Mundo_norm" in df_calc.columns
+        else 0
+    )
+    pci_norm = df_calc["PCI_norm"] if "PCI_norm" in df_calc.columns else 0
+    dist_norm = (
+        df_calc["Distancia_Parceiros_norm"]
+        if "Distancia_Parceiros_norm" in df_calc.columns
+        else 0
+    )
 
-    dist_norm = df_calc.get("Distancia_Parceiros_NORM", 0).fillna(0)
-    proximidade_norm = 1 - dist_norm  # Inverte distância para proximidade
+    # Lógica das colunas X, Y, Z, AA do .ods
+    df_calc["X"] = vcr_ce_norm * pesos.get("vcr_ceara", 0)
+    df_calc["Y"] = vcr_br_norm * pesos.get("vcr_brasil", 0)
+    df_calc["Z"] = pci_norm * pesos.get("pci", 0)
+    df_calc["AA"] = dist_norm * pesos.get("distancia", 0)
 
-    # 1. Cálculo do sub-índice de VCR (Estadual + Nacional)
-    peso_vcr_total = pesos["vcr_ceara"] + pesos["vcr_brasil"]
-
-    if peso_vcr_total > 0:
-        # Redistribui os pesos proporcionalmente apenas entre os dois VCRs existentes
-        peso_vcr_ceara = pesos["vcr_ceara"] / peso_vcr_total
-        peso_vcr_brasil = pesos["vcr_brasil"] / peso_vcr_total
-        indice_vcr = (vcr_ce_norm * peso_vcr_ceara) + (vcr_br_norm * peso_vcr_brasil)
-    else:
-        indice_vcr = (vcr_ce_norm + vcr_br_norm) / 2
-
-    # 2. Cálculo do Índice Final
-    # O VCR Composto tem peso fixo de 1 na proporção com PCI e Distância
-    peso_total_geral = 1 + pesos["pci"] + pesos["distancia"]
-
-    peso_vcr_composto = 1 / peso_total_geral
-    peso_pci = pesos["pci"] / peso_total_geral
-    peso_distancia = pesos["distancia"] / peso_total_geral
-
+    # Soma final (Coluna AC do .ods / Ranking da Planilha8)
     df_calc["INDICE_PRIORIDADE_AJUSTADO"] = (
-        (indice_vcr * peso_vcr_composto)
-        + (pci_norm * peso_pci)
-        + (proximidade_norm * peso_distancia)
+        df_calc["X"] + df_calc["Y"] + df_calc["Z"] + df_calc["AA"]
     )
 
     return df_calc
@@ -195,43 +190,47 @@ def filtrar_mapeamento_por_cliente(
 
 def classificar_cenarios_vcr(df):
     """
-    Classifica os produtos em 7 cenários estratégicos baseados no
-    cruzamento da VCR Estadual (Ceará) e VCR Nacional (Brasil).
+    Classifica os produtos em IDs de Cenário (1 a 7).
+    Mantém as descrições oficiais disponíveis para referência.
     """
+    # Dicionário mapeando os IDs para as descrições Ipsis Verbis
+    descricoes_oficiais = {
+        "Cenário 1": "Setores com Vantagem Comparativa no Ceará e no Brasil",
+        "Cenário 2": "Setores com Vantagem Comparativa apenas no Ceará",
+        "Cenário 3": "Setores com Vantagem Comparativa apenas no Brasil",
+        "Cenário 4": "Setores com Potencial de Vantagem Comparativa no Ceará e no Brasil",
+        "Cenário 5": "Setores com Potencial de Vantagem Comparativa apenas no Ceará",
+        "Cenário 6": "Setores com Potencial de Vantagem Comparativa apenas no Brasil",
+        "Cenário 7": "Setores sem Vantagem Comparativa ou Potencial de Vantagem",
+    }
 
-    def definir_regra(row):
+    def definir_id(row):
         vce = row.get("VCR_Ceara_Brasil", 0)
         vbr = row.get("VCR_Brasil_Mundo", 0)
 
-        # Cenário 1: Alta competitividade em ambos
-        if vce > 1 and vbr > 1:
-            return "1. Sinergia: Especialização Consolidada (Local e Nacional)"
+        # Lógica de Quadrantes VCR >= 1.0
+        if vce >= 1 and vbr >= 1:
+            return "Cenário 1"
+        if vce >= 1 and vbr < 1:
+            return "Cenário 2"
+        if vce < 1 and vbr >= 1:
+            return "Cenário 3"
 
-        # Cenário 2: Ceará forte, Brasil não
-        elif vce > 1 and vbr <= 1:
-            return "2. Diferencial Regional: Especialização Exclusiva do Estado"
+        # Lógica de Potencial 0.5 <= VCR < 1.0
+        if 0.5 <= vce < 1 and 0.5 <= vbr < 1:
+            return "Cenário 4"
+        if 0.5 <= vce < 1 and vbr < 0.5:
+            return "Cenário 5"
+        if vce < 0.5 and 0 < vbr:
+            return "Cenário 6"
 
-        # Cenário 3: Brasil forte, Ceará não (Oportunidade de captura)
-        elif vce <= 1 and vbr > 1:
-            return "3. Oportunidade: Potencial de Ganho de Market Share Nacional"
+        return "Cenário 7"
 
-        # Cenário 4: Transição Positiva (Ambos moderados/crescentes)
-        elif 0.5 < vce <= 1 and 0.5 < vbr <= 1:
-            return "4. Setor Emergente: Em Maturação em Ambos os Níveis"
+    df["Cenário ID"] = df.apply(definir_id, axis=1)
+    # Criamos esta coluna apenas para consulta se necessário,
+    # a visualização usará o 'Cenário ID'
+    df["Cenário Descrição"] = df["Cenário ID"].map(descricoes_oficiais)
 
-        # Cenário 5: Nicho em formação no Estado
-        elif 0.5 < vce <= 1 and vbr <= 0.5:
-            return "5. Nicho: Desenvolvimento Inicial no Estado"
-
-        # Cenário 6: Presença Nacional com vácuo local
-        elif vce <= 0.5 and 0.5 < vbr <= 1:
-            return "6. Retaguarda: Presença Nacional sem Reflexo Local"
-
-        # Cenário 7: Baixa prioridade competitiva
-        else:
-            return "7. Incipiente: Baixa Especialização em Ambos os Níveis"
-
-    df["Cenário Estratégico"] = df.apply(definir_regra, axis=1)
     return df
 
 

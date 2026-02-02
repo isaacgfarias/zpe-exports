@@ -18,28 +18,31 @@ from core.vcr_calculators import calcular_vcr_dentro_selecao
 
 def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
     """
-    Renderiza a aba de Análise Comparativa com UX otimizada:
-    Filtros e pesos ocultos em expander e suporte a seleção múltipla de cenários.
+    Renderiza a aba Análise Comparativa com lógica de normalização Min-Max (M-AA)
+    e classificação por IDs de Cenário (1-7) com suporte a legendas oficiais.
     """
     st.header("Análise Comparativa de Especialização e Complexidade")
 
-    # --- 1. Processamento Inicial de Dados (Necessário para popular os filtros) ---
-    with st.spinner("Preparando motor de busca..."):
+    # --- 1. PROCESSAMENTO E CONSOLIDAÇÃO DE DADOS ---
+    with st.spinner("Consolidando métricas e aplicando lógica de normalização..."):
+        # Métricas Base
         df_ce = calcular_vcr_ceara_brasil(comexstat_df)
         df_br = obter_vcr_brasil_mundo(harvard_df)
         df_metrics = obter_pci_e_distancia(harvard_df)
 
+        # Descrições HS4
         df_descricoes = comexstat_df[["headingCode", "heading"]].drop_duplicates()
         df_descricoes["headingCode"] = (
             df_descricoes["headingCode"].astype(str).str.zfill(4)
         )
 
+        # Merge Principal
         df_final = df_ce.merge(df_br, on="headingCode", how="left")
         df_final = df_final.merge(df_metrics, on="headingCode", how="left")
         df_final["headingCode"] = df_final["headingCode"].astype(str).str.zfill(4)
         df_final = df_final.merge(df_descricoes, on="headingCode", how="left").fillna(0)
 
-        # Mapeamento NCM/CNAE
+        # Mapeamento NCM/CNAE (Agrupado em linha única)
         PATH_MAP = "resources/NCM2012XCNAE20.xls"
         try:
             df_map_raw = pd.read_excel(PATH_MAP, skiprows=1, engine="xlrd").iloc[:, :3]
@@ -71,61 +74,76 @@ def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
             df_final["ncm8"] = "Não disp."
             df_final["cnae_raw"] = "Não disp."
 
-        # Classificação dos 7 Cenários
+        # Aplicação da Classificação por Cenários (IDs 1 a 7)
         df_final = classificar_cenarios_vcr(df_final)
 
-    # --- 2. ÁREA DE CONFIGURAÇÃO E FILTROS (UX: Expander) ---
-    with st.expander("🛠️ Configurações de Pesos e Filtros Avançados", expanded=False):
-        st.markdown("#### ⚖️ Ajuste de Pesos (Índice de Prioridade)")
-        c_p1, c_p2, c_p3, c_p4 = st.columns(4)
+    # --- 2. ÁREA DE CONFIGURAÇÃO (UX: EXPANDER) ---
+    # Texto oficial ipsis verbis para tooltips e legendas
+    tooltip_legend = (
+        "**Cenário 1:** Setores com Vantagem Comparativa no Ceará e no Brasil\n\n"
+        "**Cenário 2:** Setores com Vantagem Comparativa apenas no Ceará\n\n"
+        "**Cenário 3:** Setores com Vantagem Comparativa apenas no Brasil\n\n"
+        "**Cenário 4:** Setores com Potencial de Vantagem Comparativa no Ceará e no Brasil\n\n"
+        "**Cenário 5:** Setores com Potencial de Vantagem Comparativa apenas no Ceará\n\n"
+        "**Cenário 6:** Setores com Potencial de Vantagem Comparativa apenas no Brasil\n\n"
+        "**Cenário 7:** Setores sem Vantagem Comparativa ou Potencial de Vantagem"
+    )
+
+    with st.expander("🛠️ Configurações de Pesos e Filtros de Busca", expanded=False):
+        st.markdown("#### ⚖️ Pesos do Índice (Lógica Planilha8)")
+        c1, c2, c3, c4 = st.columns(4)
         pesos_dict = {
-            "vcr_ceara": c_p1.slider("Peso VCR Estadual", 0.0, 1.0, 0.4, 0.05),
-            "vcr_brasil": c_p2.slider("Peso VCR País", 0.0, 1.0, 0.3, 0.05),
-            "pci": c_p3.slider("Peso PCI", 0.0, 1.0, 0.3, 0.05),
-            "distancia": c_p4.slider("Peso Distância", 0.0, 1.0, 0.4, 0.05),
+            "vcr_ceara": c1.slider("Peso VCR Estadual", 0.0, 1.0, 0.4, 0.05),
+            "vcr_brasil": c2.slider("Peso VCR País", 0.0, 1.0, 0.3, 0.05),
+            "pci": c3.slider("Peso PCI", 0.0, 1.0, 0.3, 0.05),
+            "distancia": c4.slider("Peso Distância", 0.0, 1.0, 0.4, 0.05),
         }
 
         st.markdown("---")
-        st.markdown("#### 🔍 Filtros de Visualização")
-        col_f1, col_f2, col_f3 = st.columns([1, 1, 2])
+        st.markdown("#### 🔍 Filtros Avançados")
+        f1, f2, f3 = st.columns([1, 1, 2])
 
-        # Filtro de Faixa HS
         all_codes = sorted(df_final["headingCode"].unique().tolist())
-        start_hs = col_f1.selectbox("HS Inicial", ["Início"] + all_codes)
-        end_hs = col_f2.selectbox("HS Final", ["Fim"] + all_codes)
+        start_hs = f1.selectbox("Faixa HS (Início)", ["Início"] + all_codes)
+        end_hs = f2.selectbox("Faixa HS (Fim)", ["Fim"] + all_codes)
 
-        # Filtro de Posicionamento Estratégico (Multiselect)
-        cenarios_disponiveis = sorted(df_final["Cenário Estratégico"].unique().tolist())
-        selected_cenarios = col_f3.multiselect(
+        # Filtro de Cenários (IDs curtos para UX limpa)
+        cenarios_disponiveis = sorted(df_final["Cenário ID"].unique().tolist())
+        selected_ids = f3.multiselect(
             "Posicionamento Estratégico",
             options=cenarios_disponiveis,
             default=cenarios_disponiveis,
-            help="Selecione um ou mais cenários para filtrar a tabela",
+            help=tooltip_legend,
         )
 
-    # --- 3. Cálculos Finais e Aplicação de Filtros ---
-    # Normalização e Índice
-    for col in ["VCR_Ceara_Brasil", "VCR_Brasil_Mundo", "PCI", "Distancia_Parceiros"]:
-        df_final = normalizar_vcr(df_final, col)
+    # --- 3. CÁLCULOS FINAIS (NORMALIZAÇÃO MIN-MAX E SOMA PONDERADA) ---
+    # 1. Normalização (Colunas M, N, O, P do .ods)
+    metricas = ["VCR_Ceara_Brasil", "VCR_Brasil_Mundo", "PCI", "Distancia_Parceiros"]
+    for col in metricas:
+        df_final = normalizar_vcr(df_final, col)  # Isso criará colunas com sufixo _norm
+
+        # 2. Cálculo do Índice (Colunas X, Y, Z, AA e soma final)
+        # Agora a função não vai mais quebrar!
     df_final = calcular_indice_prioridade_ajustado(df_final, pesos_dict)
 
-    # Aplicar Filtros
+    # 3. Aplicação de Filtros de Visualização
     df_view = df_final.copy()
     if start_hs != "Início":
         df_view = df_view[df_view["headingCode"] >= start_hs]
     if end_hs != "Fim":
         df_view = df_view[df_view["headingCode"] <= end_hs]
-    if selected_cenarios:
-        df_view = df_view[df_view["Cenário Estratégico"].isin(selected_cenarios)]
+    if selected_ids:
+        df_view = df_view[df_view["Cenário ID"].isin(selected_ids)]
 
+    # 4. Ordenação (Ranking conforme Planilha8)
     df_view = df_view.sort_values(by="INDICE_PRIORIDADE_AJUSTADO", ascending=False)
 
-    # --- 4. Exibição da Tabela ---
+    # --- 4. EXIBIÇÃO DA TABELA PRINCIPAL ---
     if not df_view.empty:
         mapping = {
             "headingCode": "HS4",
             "heading": "Produto",
-            "Cenário Estratégico": "Posicionamento Estratégico",
+            "Cenário ID": "Cenário",
             "ncm8": "NCMs",
             "cnae_raw": "CNAE",
             "INDICE_PRIORIDADE_AJUSTADO": "Prioridade",
@@ -133,32 +151,30 @@ def render_tab_compare(comexstat_df, harvard_df, comtrade_df):
             "VCR_Brasil_Mundo": "VCR Nac.",
         }
 
-        cols_display = [
-            "headingCode",
-            "heading",
-            "Cenário Estratégico",
-            "ncm8",
-            "cnae_raw",
-            "INDICE_PRIORIDADE_AJUSTADO",
-            "VCR_Ceara_Brasil",
-            "VCR_Brasil_Mundo",
-        ]
-
         st.dataframe(
-            df_view[cols_display].rename(columns=mapping),
+            df_view[list(mapping.keys())].rename(columns=mapping),
             use_container_width=True,
             hide_index=True,
             column_config={
                 "Prioridade": st.column_config.ProgressColumn(
                     format="%.2f", min_value=0, max_value=1
                 ),
-                "Posicionamento Estratégico": st.column_config.TextColumn(
-                    width="large"
+                "Cenário": st.column_config.TextColumn(
+                    width="small",
+                    help=tooltip_legend,  # Tooltip oficial no cabeçalho
                 ),
             },
         )
+
+        # --- 5. APOIO DIDÁTICO (LEGENDA FIXA) ---
+        st.markdown("---")
+        with st.expander(
+            "📖 Legenda dos Cenários Estratégicos (Descrições Oficiais)", expanded=False
+        ):
+            st.caption(tooltip_legend)
+
     else:
-        st.info("Nenhum dado corresponde aos filtros selecionados no expander acima.")
+        st.info("Nenhum dado encontrado para os critérios selecionados no expander.")
 
 
 def render_tab_comex(comexstat_df):
